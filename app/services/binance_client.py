@@ -9,14 +9,14 @@ class BinanceClient:
         interval: str,
         limit: int = 500
     ):
-        url = f"{BINANCE_BASE_URL}/api/v3/klines"
-        params = {
-            "symbol": symbol.upper(),
-            "interval": interval,
-            "limit": limit
-        }
-
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient() as client:
+            # BINANCE_BASE_URL already includes /api/v3
+            url = f"{BINANCE_BASE_URL}/klines"
+            params = {
+                "symbol": symbol,
+                "interval": interval,
+                "limit": limit
+            }
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             return resp.json()
