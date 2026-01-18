@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 
 # 4. Expose port
-EXPOSE 8000
+EXPOSE 8003
 
 # 5. Run app
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${API_PORT:-8003}"]

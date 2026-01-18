@@ -16,13 +16,26 @@ coingecko = CoinGeckoService()
 async def get_price_history(
     symbol: str = Query(..., example="BTCUSDT"),
     interval: str = Query(..., example="1m"),
-    limit: int = Query(500, le=1000)
+    limit: int = Query(None, le=2000)
 ):
     if not is_supported_interval(interval):
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported interval: {interval}"
         )
+
+    # Auto-calculate optimal limit based on interval if not provided
+    if limit is None:
+        limit_map = {
+            "1m": 1000,  # ~16.7 hours
+            "5m": 864,   # 3 days
+            "15m": 672,  # 1 week
+            "1h": 720,   # 30 days
+            "4h": 540,   # 90 days
+            "1d": 365,   # 1 year
+            "1w": 156,   # 3 years
+        }
+        limit = limit_map.get(interval, 500)
 
     cached = await cache.get(symbol, interval)
     if cached:
