@@ -2,12 +2,10 @@ services:
   price-history:
     build: .
     container_name: price-history
-    ports:
-      - "8003:8003"
     environment:
       API_PORT: 8003
-      REDIS_URL: redis://redis:6379
-      BINANCE_BASE_URL: https://api.binance.com
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      BINANCE_BASE_URL: "${BINANCE_BASE_URL}"
     networks:
       - backend-network
     restart: unless-stopped
