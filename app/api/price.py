@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException
 from app.services.binance_client import BinanceClient
 from app.repositories.price_cache import PriceCacheRepository
+from app.repositories.candle_repository import CandleRepository
 from app.models.candle import Candle, CandleResponse
 from app.utils.time import is_supported_interval
 from app.services.coingecko_service import CoinGeckoService
@@ -10,6 +11,7 @@ router = APIRouter(prefix="/prices", tags=["Prices"])
 
 binance = BinanceClient()
 cache = PriceCacheRepository()
+candle_repo = CandleRepository()
 coingecko = CoinGeckoService()
 
 @router.get("/history", response_model=CandleResponse)
@@ -18,6 +20,10 @@ async def get_price_history(
     interval: str = Query(..., example="1m"),
     limit: int = Query(None, le=2000)
 ):
+    """
+    Get historical price candles from TimescaleDB.
+    Falls back to Binance API if symbol not found in DB.
+    """
     if not is_supported_interval(interval):
         raise HTTPException(
             status_code=400,
@@ -37,10 +43,58 @@ async def get_price_history(
         }
         limit = limit_map.get(interval, 500)
 
+    # Check cache first
     cached = await cache.get(symbol, interval)
     if cached:
         return cached
 
+    try:
+        # Try to get from TimescaleDB first
+        candles_data = await candle_repo.get_candles(symbol, interval, limit)
+        
+        if candles_data:
+            # Convert to Candle models
+            candles = [
+                Candle(
+                    open_time=c["open_time"],
+                    open=c["open"],
+                    high=c["high"],
+                    low=c["low"],
+                    close=c["close"],
+                    volume=c["volume"],
+                    close_time=c["close_time"]
+                )
+                for c in candles_data
+            ]
+            
+            response = CandleResponse(
+                symbol=symbol.upper(),
+                interval=interval,
+                candles=candles
+            ).dict()
+            
+            # Dynamic TTL based on interval (shorter intervals = shorter cache)
+            ttl_map = {
+                "1m": 5,    # 5 seconds - very fresh data
+                "5m": 10,   # 10 seconds
+                "15m": 30,  # 30 seconds
+                "1h": 60,   # 1 minute
+                "4h": 300,  # 5 minutes
+                "1d": 600,  # 10 minutes
+                "1w": 1800, # 30 minutes
+            }
+            ttl = ttl_map.get(interval, 60)
+            
+            # Cache the result with dynamic TTL
+            await cache.set(symbol, interval, response, ttl)
+            
+            return response
+            
+    except Exception as e:
+        print(f"Error fetching from DB: {e}", flush=True)
+        # Fall through to Binance API fallback
+    
+    # Fallback to Binance API if not in DB or error
     raw_klines = await binance.get_klines(symbol, interval, limit)
 
     candles = [
@@ -62,7 +116,14 @@ async def get_price_history(
         candles=candles
     ).dict()
 
-    await cache.set(symbol, interval, response)
+    # Dynamic TTL based on interval
+    ttl_map = {
+        "1m": 5, "5m": 10, "15m": 30, "1h": 60,
+        "4h": 300, "1d": 600, "1w": 1800,
+    }
+    ttl = ttl_map.get(interval, 60)
+    
+    await cache.set(symbol, interval, response, ttl)
 
     return response
 
@@ -86,6 +147,32 @@ async def get_market_cap(symbol: str):
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/current-candle")
+async def get_current_candle(
+    symbol: str = Query(..., example="BTCUSDT"),
+    interval: str = Query(..., example="5m")
+):
+    """
+    Get current open candle OHLC from Redis cache.
+    This provides the accumulated state of the current incomplete candle.
+    """
+    try:
+        # Try to get from Redis first
+        redis_key = f"current_candle:{symbol}:{interval}"
+        current_candle = await cache.redis.get(redis_key)
+        
+        if current_candle:
+            import json
+            return json.loads(current_candle)
+        
+        # If not in Redis, return None (frontend will handle)
+        return None
+        
+    except Exception as e:
+        print(f"Error fetching current candle: {e}", flush=True)
+        return None
+
 
 @router.get("/market-overview")
 async def get_market_overview():

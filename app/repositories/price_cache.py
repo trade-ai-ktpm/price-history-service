@@ -1,6 +1,6 @@
 import json
 import redis.asyncio as redis
-from app.config import REDIS_HOST, REDIS_PORT, REDIS_DB, CACHE_TTL_SECONDS
+from app.config import REDIS_HOST, REDIS_PORT, REDIS_DB, REDIS_PASSWORD
 
 class PriceCacheRepository:
 
@@ -9,6 +9,7 @@ class PriceCacheRepository:
             host=REDIS_HOST,
             port=REDIS_PORT,
             db=REDIS_DB,
+            password=REDIS_PASSWORD,
             decode_responses=True
         )
 
@@ -22,10 +23,14 @@ class PriceCacheRepository:
             return json.loads(data)
         return None
 
-    async def set(self, symbol: str, interval: str, value):
+    async def set(self, symbol: str, interval: str, value, ttl: int = None):
         key = self._key(symbol, interval)
+        # Use provided ttl or default from config
+        if ttl is None:
+            from app.config import CACHE_TTL_SECONDS
+            ttl = CACHE_TTL_SECONDS
         await self.redis.setex(
             key,
-            CACHE_TTL_SECONDS,
+            ttl,
             json.dumps(value)
         )
