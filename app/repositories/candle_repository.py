@@ -65,7 +65,15 @@ class CandleRepository:
         for candle in candles_1m:
             # Get bucket start time for this interval
             timestamp_ms = int(candle['time']) * 1000
-            bucket_start_ms = (timestamp_ms // (interval_minutes * 60 * 1000)) * (interval_minutes * 60 * 1000)
+            
+            # Special handling for 1w to align with Monday
+            if interval == "1w":
+                offset_ms = 345600 * 1000  # 4 days in ms
+                interval_ms = interval_minutes * 60 * 1000
+                bucket_start_ms = ((timestamp_ms - offset_ms) // interval_ms) * interval_ms + offset_ms
+            else:
+                bucket_start_ms = (timestamp_ms // (interval_minutes * 60 * 1000)) * (interval_minutes * 60 * 1000)
+                
             bucket_start = bucket_start_ms // 1000  # Back to seconds
             
             if bucket_start not in aggregated:
